@@ -1,4 +1,5 @@
 #include <iostream> // To input_&print.
+#include <stdio.h>
 #include <time.h>
 #include <stdlib.h>  // To creat random nums.
 #include <string.h>  // String.
@@ -7,15 +8,18 @@
 #include <cctype> // Switch upper letters to lower.
 using namespace std;
 
-void move_num(int bd[4][4], string move_, int (&arr)[4][4], bool record_grade = true);
-void pre_move(int bd[4][4], string move_, int (&arr)[4][4], bool record_grade = false);
+void move_num(int bd[4][4], string move_, int (&arr)[4][4], bool real_move = true);
+void pre_move(int bd[4][4], string move_, int (&arr)[4][4], bool real_move = false);
 void print_board();
+// void print_board2();
 void add_num();
 void is_over();
 void get_direction(string tips);
 void game();
+void gotoxy(short x, short y);
 // void lt_lab();
 // void command();
+void setColor(bool flag = false);
 
 string input_(); // input_ without pressing enter.
 
@@ -23,28 +27,82 @@ int where_empty();
 int new_num();
 
 // Define global variables.
-bool over = false, w_ok = true, s_ok = true, a_ok = true, d_ok = true;
-string mv = " ";
+bool over, w_ok, s_ok, a_ok, d_ok;
+string mv;
 // char what_color[8];
-int Grade = 0;
+int Grade;
+// Get handle.
+HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
+CONSOLE_SCREEN_BUFFER_INFO pos[3];
 
-// Define the game board and the pretend board.
-// The pretend board enables judge the following running steps.
-int board[4][4] = {{0, 0, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}},
-    my_bd[4][4] = {{0, 0, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}};
+int board[4][4]; // Define the game board.
+int my_bd[4][4]; // The pretend board enables judge the following running steps.
+int or_bd[4][4]; // Original board helps judge which pos changes.
+
+// Record which pos changes.
+int change[4][4];
+
+// To clear the pos which's yellow in last turn.
+int clear_color[2];
 
 int main()
 {
+    // Set title.
+    SetConsoleTitleA("2048");
+
+    // Hide the cursor.
+    cout << "\033[?25l";
+
     // Creat a seed for random num.
     srand(time(0));
 
-    // Go to game().
-    game();
+    while (1)
+    {
+        // Initialize the following variables.
+        over = false;
+        Grade = 0;
+        // w_ok = true;
+        // s_ok = true;
+        // a_ok = true;
+        // d_ok = true;
 
-    // Pause and wait for user closing the window.
-    cout << "Press any key to close the window.";
-    _getch();
+        // Go to game().
+        game();
 
+        // // Pause and wait for user closing the window.
+        // cout << "Press any key to close the window.";
+        // _getch();
+
+        if (mv == "quit")
+            break;
+        if (mv == "restart")
+        {
+            for (int x = 0; x < 4; x++)
+                for (int y = 0; y < 4; y++)
+                    board[x][y] = 0;
+            system("cls");
+            continue;
+        }
+
+        // Pause and wait for an input.
+        gotoxy(pos[2].dwCursorPosition.X, pos[2].dwCursorPosition.Y);
+        cout << "\033[0K" << "Game Over!" << endl;
+        cout << "Press \"q\" to quit, \"r\" to restart.";
+        string choice;
+        while (choice != "q" && choice != "r")
+            choice = input_();
+        if (choice == "q")
+            break;
+
+        for (int x = 0; x < 4; x++)
+            for (int y = 0; y < 4; y++)
+            {
+                board[x][y] = 0;
+                my_bd[x][y] = 0;
+                or_bd[x][y] = 0;
+            }
+        system("cls");
+    }
     // Exit.
     return 0;
 }
@@ -77,26 +135,46 @@ void game()
     // Generate 2 nums.
     add_num();
     add_num();
-    // Print the board.
-    print_board();
+    // // Print the board.
+    // print_board();
+
+    // Print original board.
+    cout << "Grade: ";
+    // Get coord where grade start.
+    CONSOLE_SCREEN_BUFFER_INFO GradeInfo;
+    GetConsoleScreenBufferInfo(hConsole, &GradeInfo);
+    pos[0] = GradeInfo;
+    printf("%6d\n\n", Grade);
+
+    // Get coord where num start.
+    CONSOLE_SCREEN_BUFFER_INFO NumInfo;
+    GetConsoleScreenBufferInfo(hConsole, &NumInfo);
+    pos[1] = NumInfo;
+    for (int x = 0; x < 4; x++)
+    {
+        for (int y = 0; y < 4; y++)
+        {
+            if (board[x][y])
+                printf("%-8d", board[x][y]);
+            else
+                printf("%8s", "");
+        }
+        cout << endl
+             << endl;
+    }
+
+    // Get coord where tips start.
+    CONSOLE_SCREEN_BUFFER_INFO TipInfo;
+    GetConsoleScreenBufferInfo(hConsole, &TipInfo);
+    pos[2] = TipInfo;
 
     // Start the game.
     while (!over)
     {
-        // input_ a direction.
-        get_direction("input_ \"wsad\" to move nums. ");
-        if (over)
-            break;
-        pre_move(board, mv, board, true);
-
-        // After the combination/movement of some nums, there must have been at least one gap to add num.
-        add_num();
-
-        // Clear the screen and print the board.
-        system("cls");
-        print_board();
-
         // Initialize the following variables.
+        for (int x = 0; x < 4; x++)
+            for (int y = 0; y < 4; y++)
+                change[x][y] = 0;
         w_ok = true;
         s_ok = true;
         a_ok = true;
@@ -104,6 +182,30 @@ void game()
 
         // Judge if game is over.
         is_over();
+        if (over)
+            break;
+
+        // Input a direction.
+        get_direction("Input \"wsad\" to move nums. ");
+        if (over) // Considering the case of inputing "q"/"r".
+            break;
+        pre_move(board, mv, board, true);
+
+        // After the combination/movement of some nums, there must have been at least one gap to add num.
+        add_num();
+
+        // // Clear the screen and print the board.
+        // system("cls");
+        for (int x = 0; x < 4; x++)
+        {
+            for (int y = 0; y < 4; y++)
+            {
+                if (change[x][y] != 2)
+                    change[x][y] = (board[x][y] != or_bd[x][y]);
+            }
+        }
+
+        print_board();
 
         // // Change color.
         // command();
@@ -120,28 +222,113 @@ int new_num() // To generate new num.
     return 4;     // While 4 at 10%.
 }
 
-void print_board() // Print the game board.
+// void print_board() // Print the game board.
+// {
+//     cout << "Grade: " << Grade << endl;
+//     cout << endl;
+//     for (int x = 0; x < 4; x++)
+//     {
+//         for (int y = 0; y < 4; y++)
+//         {
+//             if (board[x][y])
+//                 cout << board[x][y] << '\t';
+//             else
+//                 cout << " \t";
+//         }
+//         cout << endl
+//              << endl;
+//     }
+// }
+
+void gotoxy(short x, short y) // Set the cursor's position at coord (x, y).
 {
-    cout << "Grade: " << Grade << endl;
-    cout << endl;
+    COORD position = {x, y};
+    SetConsoleCursorPosition(hConsole, position);
+}
+
+void setColor(bool flag) // Set color.
+{
+    if (!flag)
+        SetConsoleTextAttribute(hConsole, 7); // White
+    else
+        SetConsoleTextAttribute(hConsole, 14); // Yellow
+}
+
+void print_board() // Print the game board, and avoid flashing.
+{
+    // Go to where grade should be print.
+    gotoxy(pos[0].dwCursorPosition.X, pos[0].dwCursorPosition.Y);
+    printf("%6d", Grade);
+    if (clear_color)
+    {
+        gotoxy(pos[1].dwCursorPosition.X + 8 * clear_color[1], pos[1].dwCursorPosition.Y + 2 * clear_color[0]);
+        if (board[clear_color[0]][clear_color[1]])
+            printf("%-8d", board[clear_color[0]][clear_color[1]]);
+        else
+            printf("%8s", "");
+    }
+
     for (int x = 0; x < 4; x++)
     {
         for (int y = 0; y < 4; y++)
         {
-            if (board[x][y])
-                cout << board[x][y] << '\t';
-            else
-                cout << " \t";
+            if (change[x][y])
+            {
+                setColor(change[x][y] - 1);
+                if (change[x][y] == 2)
+                {
+                    clear_color[0] = x;
+                    clear_color[1] = y;
+                }
+
+                gotoxy(pos[1].dwCursorPosition.X + 8 * y, pos[1].dwCursorPosition.Y + 2 * x);
+                if (board[x][y])
+                    printf("%-8d", board[x][y]);
+                else
+                    printf("%8s", "");
+            }
         }
-        cout << endl
-             << endl;
     }
+    setColor();
 }
+
+// void print_board2() // Print the game board.
+// {
+//     gotoxy(0, 10);
+//     cout << "----------------" << endl
+//          << endl;
+//     cout << "Grade: " << Grade << endl;
+//     cout << endl;
+//     for (int x = 0; x < 4; x++)
+//     {
+//         for (int y = 0; y < 4; y++)
+//         {
+//             if (board[x][y])
+//                 cout << board[x][y] << '\t';
+//             else
+//                 cout << " \t";
+//         }
+//         cout << endl
+//              << endl;
+//     }
+//     cout << "----------------" << endl
+//          << endl;
+//     for (int x = 0; x < 4; x++)
+//     {
+//         for (int y = 0; y < 4; y++)
+//         {
+//             cout << change[x][y] << '\t';
+//         }
+//         cout << endl
+//              << endl;
+//     }
+// }
 
 void add_num() // Generate new num on the board.
 {
     int posi = where_empty();
     board[posi / 10 - 1][posi % 10 - 1] = new_num();
+    change[posi / 10 - 1][posi % 10 - 1] = 2;
 }
 
 int where_empty() // Find an empty place.
@@ -164,7 +351,11 @@ int where_empty() // Find an empty place.
 void get_direction(string tips) // input_ how to move the num.
 {
     bool conti = true;
-    cout << tips;
+    if (tips != "")
+    {
+        gotoxy(pos[2].dwCursorPosition.X, pos[2].dwCursorPosition.Y);
+        cout << "\033[0K" << tips;
+    }
     while (conti)
     {
         // if (mv = input_())
@@ -195,18 +386,24 @@ void get_direction(string tips) // input_ how to move the num.
         else if (/*mv == "Q" || */ mv == "q") // Allow quit the game.
         {
             string quit;
-            cout << "Exit? (\'y\')";
+            gotoxy(pos[2].dwCursorPosition.X, pos[2].dwCursorPosition.Y);
+            cout << "\033[0K" << "Want to quit the game? (\'y\')";
             // if (quit = input_())
             // {
             quit = input_();
             if (quit == "y")
             {
                 over = true;
+                gotoxy(pos[2].dwCursorPosition.X, pos[2].dwCursorPosition.Y);
+                cout << "\033[0K";
+                mv = "quit";
                 break;
             }
-            system("cls");
-            print_board();
-            cout << tips;
+            // // system("cls");
+            // print_board();
+            // cout << tips;
+            gotoxy(pos[2].dwCursorPosition.X, pos[2].dwCursorPosition.Y);
+            cout << "\033[0K" << "Input \"wsad\" to move nums. ";
             // }
             // else
             // {
@@ -220,7 +417,7 @@ void get_direction(string tips) // input_ how to move the num.
             //             over = true;
             //             break;
             //         }
-            //         system("cls");
+            //         // system("cls");
             //         print_board();
             //         cout << tips;
             //     }
@@ -232,10 +429,28 @@ void get_direction(string tips) // input_ how to move the num.
             //     }
             // }
         }
+        else if (mv == "r")
+        {
+            string restart;
+            gotoxy(pos[2].dwCursorPosition.X, pos[2].dwCursorPosition.Y);
+            cout << "\033[0K" << "Want to restart the game? (\'y\')";
+            restart = input_();
+            if (restart == "y")
+            {
+                over = true;
+                gotoxy(pos[2].dwCursorPosition.X, pos[2].dwCursorPosition.Y);
+                cout << "\033[0K";
+                mv = "restart";
+                break;
+            }
+            gotoxy(pos[2].dwCursorPosition.X, pos[2].dwCursorPosition.Y);
+            cout << "\033[0K" << "Input \"wsad\" to move nums. ";
+        }
+
         else
         {
             // // input_ not in law.
-            // system("cls");
+            // // system("cls");
             // print_board();
             // cout << "Not a legal value, please enter another: ";
             continue;
@@ -252,7 +467,7 @@ void get_direction(string tips) // input_ how to move the num.
         //         over = true;
         //         break;
         //     }
-        //     system("cls");
+        //     // system("cls");
         //     print_board();
         //     cout << tips;
         //     // if (quit = input_())
@@ -262,7 +477,7 @@ void get_direction(string tips) // input_ how to move the num.
         //     //         over = true;
         //     //         break;
         //     //     }
-        //     //     system("cls");
+        //     //     // system("cls");
         //     //     print_board();
         //     //     cout << tips;
         //     // }
@@ -276,7 +491,7 @@ void get_direction(string tips) // input_ how to move the num.
     }
 }
 
-void pre_move(int bd[4][4], string move_, int (&arr)[4][4], bool record_grade) // Avoid orgin board being changed.
+void pre_move(int bd[4][4], string move_, int (&arr)[4][4], bool real_move) // Avoid orgin board being changed.
 {
     int temp[4][4];
     for (int x = 0; x < 4; x++)
@@ -287,18 +502,25 @@ void pre_move(int bd[4][4], string move_, int (&arr)[4][4], bool record_grade) /
             temp[x][y] = bd[x][y];
         }
     }
-    move_num(temp, move_, arr, record_grade);
+
+    // Record orinal board.
+    if (real_move)
+    {
+        for (int x = 0; x < 4; x++)
+        {
+            for (int y = 0; y < 4; y++)
+                or_bd[x][y] = bd[x][y];
+        }
+    }
+
+    move_num(temp, move_, arr, real_move);
 }
 
 void is_over() // Judge if game is over.
 {
     for (int x = 0; x < 4; x++)
-    {
         for (int y = 0; y < 4; y++)
-        {
             my_bd[x][y] = board[x][y];
-        }
-    }
 
     /* Predict every direction, in a bid to judge
     what direction the user cannot move to.*/
@@ -370,13 +592,10 @@ void is_over() // Judge if game is over.
         d_ok = false;
 
     if (!(w_ok || s_ok || a_ok || d_ok))
-    {
         over = true;
-        cout << "Game Over!" << endl;
-    }
 }
 
-void move_num(int bd[4][4], string move_, int (&arr)[4][4], bool record_grade) // Move and combine nums.
+void move_num(int bd[4][4], string move_, int (&arr)[4][4], bool real_move) // Move and combine nums.
 {
     // If over stop the game.
     if (over)
@@ -387,7 +606,7 @@ void move_num(int bd[4][4], string move_, int (&arr)[4][4], bool record_grade) /
         // Judge if the direction's correct.
         if (!w_ok)
         {
-            // system("cls");
+            // // system("cls");
             // print_board();
             // get_direction("Not a legal direction, please input_ another: ");
             get_direction("");
@@ -409,7 +628,7 @@ void move_num(int bd[4][4], string move_, int (&arr)[4][4], bool record_grade) /
                         break; // Avoid out of range.
                     if (bd[x][y] == bd[x + i][y])
                     {
-                        if (record_grade)
+                        if (real_move)
                             Grade += bd[x][y];
                         bd[x][y] *= 2;
                         bd[x + i][y] = 0;
@@ -447,7 +666,7 @@ void move_num(int bd[4][4], string move_, int (&arr)[4][4], bool record_grade) /
         // Judge.
         if (!s_ok)
         {
-            // system("cls");
+            // // system("cls");
             // print_board();
             // get_direction("Not a legal direction, please input_ another: ");
             get_direction("");
@@ -469,7 +688,7 @@ void move_num(int bd[4][4], string move_, int (&arr)[4][4], bool record_grade) /
                         break;
                     if (bd[x][y] == bd[x - i][y])
                     {
-                        if (record_grade)
+                        if (real_move)
                             Grade += bd[x][y];
                         bd[x][y] *= 2;
                         bd[x - i][y] = 0;
@@ -506,7 +725,7 @@ void move_num(int bd[4][4], string move_, int (&arr)[4][4], bool record_grade) /
         // Judge.
         if (!a_ok)
         {
-            // system("cls");
+            // // system("cls");
             // print_board();
             // get_direction("Not a legal direction, please input_ another: ");
             get_direction("");
@@ -528,7 +747,7 @@ void move_num(int bd[4][4], string move_, int (&arr)[4][4], bool record_grade) /
                         break;
                     if (bd[x][y] == bd[x][y + i])
                     {
-                        if (record_grade)
+                        if (real_move)
                             Grade += bd[x][y];
                         bd[x][y] *= 2;
                         bd[x][y + i] = 0;
@@ -565,7 +784,7 @@ void move_num(int bd[4][4], string move_, int (&arr)[4][4], bool record_grade) /
         // Judge.
         if (!d_ok)
         {
-            // system("cls");
+            // // system("cls");
             // print_board();
             // get_direction("Not a legal direction, please input_ another: ");
             get_direction("");
@@ -587,7 +806,7 @@ void move_num(int bd[4][4], string move_, int (&arr)[4][4], bool record_grade) /
                         break;
                     if (bd[x][y] == bd[x][y - i])
                     {
-                        if (record_grade)
+                        if (real_move)
                             Grade += bd[x][y];
                         bd[x][y] *= 2;
                         bd[x][y - i] = 0;
